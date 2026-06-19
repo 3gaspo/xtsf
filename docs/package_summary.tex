@@ -1,0 +1,353 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\title{XPC Package Summary\\A Universal Monte Carlo Shapley Toolkit}
+\author{Generated technical summary}
+\date{\today}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\shape}[1]{\ensuremath{\left(#1\right)}}
+\newcommand{\flowbox}[1]{\fbox{\begin{minipage}{0.22\linewidth}\centering #1\end{minipage}}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+XPC is a compact Python package for Monte Carlo Shapley explanations over
+explicit feature groups.  It supports ordinary tabular data and temporal tensors
+of shape \(\shape{n,d,f}\), where each sample--time location \((n,d)\) can be
+explained while the model still receives the complete sequence context.  The
+package intentionally exposes one explanation family: Monte Carlo Shapley over
+feature-group players.  Kernel SHAP, permutation SHAP, GAM-specific logic,
+SMACH-specific logic, generative conditioning, and estimator-side known
+contribution handling are outside the estimator.
+\end{abstract}
+
+\section{Design Goals}
+
+The package is organized around a small set of explicit abstractions:
+\[
+\text{\code{DataSpec}},\quad
+\text{\code{ModelAdapter}},\quad
+\text{\code{Masker}},\quad
+\text{\code{Conditioner}},\quad
+\text{\code{FeatureGroups}},\quad
+\text{\code{ShapleyExplainer}},\quad
+\text{\code{Explanation}}.
+\]
+Each abstraction owns one concern.  Data layout is separate from model calling;
+model calling is separate from masking; masking is separate from conditioning;
+and signed Shapley estimation is separate from positive post-processing.
+
+\section{End-to-End Flow}
+
+\begin{figure}[h]
+\centering
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{ccccc}
+\flowbox{Input data\\\(\shape{n,f}\) or \(\shape{n,d,f}\)}
+& \(\Longrightarrow\) &
+\flowbox{\code{DataSpec}\\normalize units}
+& \(\Longrightarrow\) &
+\flowbox{\code{Masker}\\coalition variants}
+\\[6mm]
+\flowbox{\code{FeatureGroups}\\players \(G\)}
+& \(\nearrow\) & &
+\(\searrow\) &
+\flowbox{\code{ModelAdapter}\\predictions}
+\\[6mm]
+& & &
+\(\Longrightarrow\) &
+\flowbox{\code{ShapleyExplainer}\\Monte Carlo deltas}
+\\[6mm]
+& & & &
+\(\Downarrow\)
+\\[2mm]
+& & &
+\flowbox{\code{Explanation}\\signed values}
+& \(\Longrightarrow\)
+\flowbox{Heightening\\comparison}
+\end{tabular}
+\caption{Main runtime flow.  The estimator receives normalized data units,
+resolved feature-group players, masked coalition variants, and model
+predictions, then returns signed group Shapley values.}
+\end{figure}
+
+\section{Data Layout}
+
+\subsection{Tabular Data}
+
+\code{DataSpec} represents independent rows:
+\[
+X \in \mathbb{R}^{n \times f}.
+\]
+The explained units are row indices \(i \in \{1,\dots,n\}\).  Model outputs are
+normalized to
+\[
+\hat{y}(X) \in \mathbb{R}^{n \times H},
+\]
+where \(H=1\) for scalar predictions and \(H>1\) for multi-output models.
+The resulting explanation has shape
+\[
+\Phi \in \mathbb{R}^{n \times H \times G},
+\]
+where \(G\) is the number of feature-group players.
+
+\subsection{Temporal Tensor Data}
+
+\code{TimeSeriesTensorSpec} represents sequences:
+\[
+X \in \mathbb{R}^{n \times d \times f}.
+\]
+The explained units are pairs \((i,t)\).  For a perturbed feature row at time
+\(t\), XPC duplicates the complete sequence \(X_i\), replaces only the selected
+time-location row, runs the sequence model, and extracts the output at time
+\(t\).  Model outputs are normalized to
+\[
+\hat{y}(X) \in \mathbb{R}^{n \times d \times H},
+\]
+and explanations have shape
+\[
+\Phi \in \mathbb{R}^{n \times d \times H \times G}.
+\]
+This lets temporal models use sequence context without forcing the user to
+flatten time into independent rows.
+
+\section{Model Adapters}
+
+\code{ModelAdapter} gives the explainer a uniform prediction boundary:
+\[
+\code{predict}(X_{\mathrm{batch}}) \rightarrow \mathrm{numpy\ array}.
+\]
+The package includes adapters for:
+\begin{itemize}
+  \item NumPy callables and objects with a \code{predict} method;
+  \item pandas DataFrame models through \code{PandasModelAdapter};
+  \item sklearn-style estimators through \code{SklearnModelAdapter};
+  \item PyTorch modules through \code{TorchModelAdapter};
+  \item external scripts through \code{ScriptModelAdapter};
+  \item R scripts through \code{RScriptModelAdapter};
+  \item custom registered classes through \code{register\_model\_adapter}.
+\end{itemize}
+Adapters do not change the Shapley algorithm.  They only translate data and
+prediction outputs.
+
+\section{Feature Groups}
+
+Feature groups are the Shapley players.  A group \(g\) is a disjoint subset of
+raw feature indices:
+\[
+P_g \subseteq \{1,\dots,f\}.
+\]
+The package supports:
+\begin{itemize}
+  \item every feature as an individual player;
+  \item custom named groups;
+  \item remaining features as individual players;
+  \item remaining features as one named group;
+  \item always-present features.
+\end{itemize}
+Always-present features are included in every coalition and therefore influence
+the base value rather than receiving their own Shapley value.
+
+\section{Masking And Conditioning}
+
+For a unit feature row \(x\) and a present feature set \(S\), a masker creates
+masked samples \(\tilde{x}^{(m)}_S\) by preserving \(x_S\) and replacing missing
+features \(\bar{S}\).
+
+\subsection{Baseline Masking}
+
+\code{BaselineMasker} replaces missing features with a deterministic baseline.
+Accepted baselines are:
+\[
+\text{zero},\quad \text{mean},\quad \text{median},\quad
+\text{scalar},\quad \text{feature vector},\quad
+\text{tensor},\quad \text{callable}.
+\]
+Tensor baselines may be full data-shaped tensors, which is especially useful
+for temporal explanations.
+
+\subsection{Random Empirical Masking}
+
+\code{RandomMasker} samples replacement rows from a reference/background matrix
+without conditioning:
+\[
+\tilde{x}_{\bar{S}} \sim \widehat{P}(X_{\bar{S}}).
+\]
+
+\subsection{Conditional Masking}
+
+\code{ConditionalMasker} is non-generative.  It delegates to a conditioner that
+selects observed reference rows:
+\[
+\tilde{x}_{\bar{S}} \sim \widehat{P}(X_{\bar{S}} \mid X_S \approx x_S).
+\]
+The included conditioners are:
+\begin{itemize}
+  \item \code{EmpiricalConditioner}: nearest empirical neighbors in observed
+        feature space;
+  \item \code{GridConditioner}: empirical rows in matching grid cells, with
+        nearest-neighbor fallback;
+  \item \code{CallableConditioner}: user-defined empirical selection.
+\end{itemize}
+
+\section{Monte Carlo Shapley Estimator}
+
+For each explained unit \(u\), output horizon \(h\), and feature-group player
+\(g\), the Shapley value is
+\[
+\phi_{u,h,g}
+=
+\mathbb{E}_{S \subseteq G \setminus \{g\}}
+\left[
+v_{u,h}(S \cup \{g\}) - v_{u,h}(S)
+\right],
+\]
+where coalitions \(S\) are sampled from the Shapley subset distribution: first
+draw a coalition size uniformly from \(0,\dots,G-1\), then draw that many
+players uniformly from \(G \setminus \{g\}\).
+
+The coalition value is an empirical model expectation:
+\[
+v_{u,h}(S)
+=
+\frac{1}{M}
+\sum_{m=1}^{M}
+f_h\!\left(\tilde{x}^{(m)}_S\right),
+\]
+where \(M=\code{n\_mask\_samples}\).  The estimator averages over
+\(\code{n\_coalitions}\) sampled coalitions per player.
+
+\begin{figure}[h]
+\centering
+\begin{tabular}{c}
+\fbox{\begin{minipage}{0.55\linewidth}\centering Explained unit \(u\)\end{minipage}}
+\\[2mm]\(\Downarrow\)\\[2mm]
+\fbox{\begin{minipage}{0.55\linewidth}\centering Player \(g\)\end{minipage}}
+\\[2mm]\(\Downarrow\)\\[2mm]
+\fbox{\begin{minipage}{0.55\linewidth}\centering Sample \(S \subseteq G\setminus\{g\}\)\end{minipage}}
+\\[3mm]
+\begin{tabular}{ccc}
+\fbox{\begin{minipage}{0.28\linewidth}\centering Mask \(S\)\\predict \(v(S)\)\end{minipage}}
+& \(\qquad\) &
+\fbox{\begin{minipage}{0.28\linewidth}\centering Mask \(S\cup\{g\}\)\\predict \(v(S\cup g)\)\end{minipage}}
+\end{tabular}
+\\[3mm]\(\Downarrow\)\\[2mm]
+\fbox{\begin{minipage}{0.75\linewidth}\centering
+Average deltas:
+\(\displaystyle \phi_g \approx \frac{1}{K}\sum_k
+\left[v(S_k\cup g)-v(S_k)\right]\)
+\end{minipage}}
+\end{tabular}
+\caption{Estimator loop for one unit and one player.}
+\end{figure}
+
+\section{Explanation Object}
+
+\code{Explanation} stores the signed estimator result:
+\[
+\Phi,\quad b,\quad \hat{y},
+\]
+where \(\Phi\) has shape \(\mathrm{batch}+ (H,G)\), \(b\) is the base value
+with shape \(\mathrm{batch}+(H)\), and \(\hat{y}\) is the model prediction in
+the same output shape.  The efficiency residual is
+\[
+r = \hat{y} - \left(b + \sum_{g=1}^{G} \phi_g\right).
+\]
+For deterministic baseline masking and additive models this can be exactly
+zero; for empirical and conditional Monte Carlo masking it is a diagnostic of
+sampling noise and the chosen conditioning distribution.
+
+\section{Precomputed Contributions}
+
+Known or externally supplied contributions are deliberately not used by
+\code{ShapleyExplainer}.  Instead they enter through
+\[
+\code{Explanation.from\_contributions}(\Phi_{\mathrm{ref}}, \dots).
+\]
+This keeps the estimator mathematically clean while still allowing users to
+compare against synthetic ground truth, domain decompositions, or other
+explainers.
+
+\section{Heightening}
+
+Heightening is optional post-processing and is enabled by default.  It preserves
+signed raw values, shifts them to non-negative values, normalizes to
+percentages, and allocates positive target totals:
+\[
+o_{h,g}
+=
+\alpha \max\!\left(-\min_u \Phi_{u,h,g}, 0\right),
+\qquad \alpha \ge 0,
+\]
+\[
+\Phi^{+}_{u,h,g}
+=
+\max\!\left(\Phi_{u,h,g} + o_{h,g}, 0\right),
+\]
+\[
+p_{u,h,g}
+=
+\frac{\Phi^{+}_{u,h,g}}{\sum_j \Phi^{+}_{u,h,j}},
+\qquad
+\mathrm{part}_{u,h,g}
+=
+p_{u,h,g} \cdot T_{u,h}.
+\]
+The target \(T_{u,h}\) defaults to the model prediction and must be
+non-negative.  If all positive values are zero, XPC uses a uniform allocation
+over groups.  Pass \code{heighten=False} to keep only signed values.
+
+\section{Reference Comparison}
+
+\code{Explanation.compare(reference)} computes aggregate comparison metrics:
+mean absolute error, root mean square error, bias, maximum absolute error,
+correlation, and per-group mean absolute error.  References may be raw arrays
+or another \code{Explanation}; single-output batch vectors are broadcast to the
+package's canonical output axis.
+
+\section{Minimal Usage}
+
+\begin{verbatim}
+import numpy as np
+from xpc import BaselineMasker, ShapleyExplainer
+
+X = np.array([[1.0, 2.0], [3.0, 4.0]])
+model = lambda x: x[:, 0] + 2.0 * x[:, 1]
+
+exp = ShapleyExplainer(
+    model,
+    BaselineMasker("mean"),
+    n_coalitions=128,
+    random_state=0,
+)(X)
+
+print(exp.values.shape)      # (n, H, G)
+print(exp.efficiency_residual)
+\end{verbatim}
+
+\section{Practical Guidance}
+
+\begin{itemize}
+  \item Choose \code{FeatureGroups} according to the explanation question:
+        groups are the players, not merely display labels.
+  \item Use baseline masking for deterministic counterfactual reference values.
+  \item Use random masking for unconditional empirical replacement.
+  \item Use conditional masking when missing features should be replaced by
+        observed rows compatible with the present coalition.
+  \item Increase \code{n\_coalitions} to reduce Shapley subset noise and
+        \code{n\_mask\_samples} to reduce masking expectation noise.
+  \item Inspect \code{efficiency\_residual}; it is a useful sanity check for
+        sampling quality and model-output shape handling.
+  \item Keep signed \code{Explanation.values} for analysis.  Heightened parts
+        are attached by default for positive target decompositions and can be
+        disabled with \code{heighten=False}.
+\end{itemize}
+
+\end{document}
