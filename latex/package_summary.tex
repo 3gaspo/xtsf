@@ -1,0 +1,541 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{tabularx}
+\usepackage[hidelinks]{hyperref}
+
+\title{XTSF: Synthetic Forecasting Contributions with XPC\\
+Theory, Estimands, Implementation, and Experiments}
+\author{Gaspard Berthelier}
+\date{\today}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\MSE}{\operatorname{MSE}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+XTSF studies whether Monte Carlo Shapley explanations recover known
+contributions in a controlled forecasting problem.  A synthetic hourly load is
+generated as the sum of explicit weather, calendar, trend, and irrelevant
+components, so the structural contribution of every group is known.  The
+experiments separate two sources of error: Monte Carlo error relative to the
+chosen Shapley estimand, and estimand mismatch relative to the structural
+decomposition.  They compare interventional and nearest-neighbor conditional
+Shapley values, vary the number of sampled coalitions and masking samples, and
+reproduce three aggregation games from the original XPC work.  The accompanying
+\code{xpc} package provides the reusable data, model, masking, grouping,
+estimation, and post-processing abstractions used by the notebook.
+\end{abstract}
+
+\setcounter{tocdepth}{1}
+\tableofcontents
+\clearpage
+
+\section{Research Question and Scope}
+
+The main question is not merely whether a Shapley estimator converges.  It is
+whether the quantity to which it converges corresponds to the contribution of
+interest.  For an observation \(x\), a forecasting model \(f\), and a known
+structural decomposition \(C^{\mathrm{struct}}(x)\), the project asks:
+
+\begin{enumerate}
+  \item How quickly does Monte Carlo Shapley converge as the number of
+        coalitions and masking samples increases?
+  \item How does an interventional coalition value differ from a conditional
+        coalition value when features are dependent?
+  \item How close is each exact Shapley estimand to the known structural
+        contribution?
+  \item How do alternative aggregation games trade computation for a changed
+        estimand?
+\end{enumerate}
+
+The word \emph{contribution} therefore refers to three distinct objects:
+
+\begin{itemize}
+  \item the structural contribution specified by the synthetic data-generating
+        process;
+  \item the exact Shapley contribution for a chosen empirical coalition-value
+        function;
+  \item its finite-budget Monte Carlo estimate.
+\end{itemize}
+
+Keeping these objects separate is essential.  A low error relative to an exact
+conditional Shapley value only establishes numerical convergence to that
+conditional estimand.  It does not establish agreement with the structural or
+causal decomposition.
+
+\section{Theoretical Framework}
+
+\subsection{Shapley Values}
+
+Let \(N=\{1,\ldots,p\}\) be a set of players and let \(v_x(S)\) be the value of
+coalition \(S\subseteq N\) for the observation \(x\).  The Shapley value of
+player \(j\) is
+
+\begin{equation}
+\phi_j(x;v)
+=
+\sum_{S\subseteq N\setminus\{j\}}
+\frac{1}{p\binom{p-1}{|S|}}
+\left[v_x(S\cup\{j\})-v_x(S)\right].
+\label{eq:shapley}
+\end{equation}
+
+The weights in Equation~\eqref{eq:shapley} are equivalent to first drawing the
+coalition size uniformly from \(0,\ldots,p-1\), then drawing a subset of that
+size uniformly from the remaining players.  For a single coherent game, exact
+Shapley values satisfy efficiency:
+
+\begin{equation}
+\sum_{j=1}^{p}\phi_j(x;v)=v_x(N)-v_x(\varnothing).
+\label{eq:efficiency}
+\end{equation}
+
+In the core package, players may be raw features or explicit disjoint feature
+groups.  Changing the groups changes the cooperative game; groups are not
+merely display labels.
+
+\subsection{Baseline, Interventional, and Conditional Values}
+
+For a deterministic reference vector \(b\), baseline masking defines
+
+\begin{equation}
+v_x^{\mathrm{base}}(S)=f(x_S,b_{\bar S}).
+\end{equation}
+
+For a random feature vector \(X\), the interventional value is
+
+\begin{equation}
+v_x^{\mathrm{int}}(S)
+=\E\left[f(x_S,X_{\bar S})\right].
+\label{eq:interventional}
+\end{equation}
+
+It preserves the dependence among jointly missing features, but breaks their
+dependence with the features fixed to \(x_S\).  Consequently, it may evaluate
+combinations that are uncommon in the observed data.
+
+The conditional value is
+
+\begin{equation}
+v_x^{\mathrm{cond}}(S)
+=\E\left[f(x_S,X_{\bar S})\mid X_S=x_S\right].
+\label{eq:conditional}
+\end{equation}
+
+Conditional masking stays closer to the observed support because missing
+features are drawn from rows compatible with the present coalition.  This can
+be more realistic for prediction explanations, but it is still associational.
+Observed dependence may arise from confounding, common causes, time, or feature
+construction.  Conditional Shapley is therefore not automatically a causal
+attribution.
+
+\subsection{Exact Empirical Estimands}
+
+Let \(B=\{z^{(1)},\ldots,z^{(R)}\}\) be the finite background data.  The exact
+empirical interventional value used in the notebook is
+
+\begin{equation}
+\widehat v_x^{\mathrm{int}}(S)
+=\frac{1}{R}\sum_{r=1}^{R}f(x_S,z^{(r)}_{\bar S}).
+\label{eq:exact-interventional}
+\end{equation}
+
+For conditional values, the observed columns \(S\) are standardized by their
+background standard deviations.  Let \(\mathcal N_K(x_S)\) be the \(K=64\)
+nearest background rows in that standardized space.  The notebook defines
+
+\begin{equation}
+\widehat v_x^{\mathrm{cond}}(S)
+=\frac{1}{K}\sum_{z\in\mathcal N_K(x_S)}f(x_S,z_{\bar S}),
+\label{eq:exact-conditional}
+\end{equation}
+
+with all background rows used when \(S=\varnothing\).  An exact empirical
+Shapley reference is obtained by evaluating these deterministic coalition
+values and enumerating every subset in Equation~\eqref{eq:shapley}.
+
+Here, \emph{exact} means exact for the finite empirical or nearest-neighbor
+game.  It removes coalition-sampling and mask-sampling noise.  It is not an
+exact population conditional expectation and it is not a causal ground truth.
+
+\section{Synthetic Structural Ground Truth}
+
+\subsection{Data-Generating Process}
+
+The notebook creates 120 days of hourly observations, for \(R=2880\) rows.
+Temperature combines a slow seasonal component, an hourly component, and
+Gaussian noise.  This induces dependence between weather variables, time of
+day, weekday status, and trend.  The six model features and structural groups
+are summarized below.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l Y r@{}}
+\toprule
+Group & Feature & Definition or role & Coefficient \\
+\midrule
+Weather & heating degree & \(\max(18-T,0)\) & 1.20 \\
+Weather & cooling degree & \(\max(T-23,0)\) & 1.80 \\
+Calendar & daily peak & morning and evening Gaussian basis functions & 14.0 \\
+Calendar & weekday work & indicator for Monday through Friday & 6.0 \\
+Trend & trend & linear ramp from 0 to 1 & 10.0 \\
+Irrelevant & irrelevant & independent standard Gaussian feature & 0.0 \\
+\bottomrule
+\end{tabularx}
+\caption{Synthetic forecasting features and structural coefficients.}
+\label{tab:features}
+\end{table}
+
+The load and forecasting model are identical and contain no observation noise:
+
+\begin{equation}
+f(x)=60
++1.2x_{\mathrm{heat}}
++1.8x_{\mathrm{cool}}
++14x_{\mathrm{peak}}
++6x_{\mathrm{weekday}}
++10x_{\mathrm{trend}}.
+\label{eq:model}
+\end{equation}
+
+The true group contributions are the corresponding additive terms:
+
+\begin{align}
+C_{\mathrm{weather}}(x)
+  &=1.2x_{\mathrm{heat}}+1.8x_{\mathrm{cool}},\\
+C_{\mathrm{calendar}}(x)
+  &=14x_{\mathrm{peak}}+6x_{\mathrm{weekday}},\\
+C_{\mathrm{trend}}(x)&=10x_{\mathrm{trend}},\\
+C_{\mathrm{irrelevant}}(x)&=0.
+\end{align}
+
+Thus the structural decomposition is known for every row.  With zero-baseline
+masking, the grouped Shapley values equal these terms exactly because the model
+is additive and every basis feature is absent at zero.  This is used as an
+oracle sanity check of tensor shapes and grouping behavior.
+
+\subsection{Putting Signed Shapley Values on the Structural Scale}
+
+Empirical Shapley values explain deviations from the empty-coalition value.
+The notebook compares them with positive structural contributions by restoring
+the matching background mean:
+
+\begin{equation}
+\widehat C_g(x)=\widehat\phi_g(x)+\overline C_g,
+\qquad
+\overline C_g=\frac{1}{R}\sum_{r=1}^{R}C_g(z^{(r)}).
+\label{eq:mean-allocation}
+\end{equation}
+
+For the additive model, exact interventional Shapley satisfies
+\(\phi_g^{\mathrm{int}}(x)=C_g(x)-\overline C_g\), so
+Equation~\eqref{eq:mean-allocation} recovers structural truth.  Conditional
+Shapley may reallocate signal across dependent groups, so the same mean
+allocation does not generally recover each structural component.
+
+Two mean squared errors are reported over evaluation rows \(i\) and groups
+\(g\):
+
+\begin{align}
+\MSE_{\mathrm{struct}}
+  &=\frac{1}{nG}\sum_{i,g}
+    \left(\widehat C_{i,g}-C^{\mathrm{struct}}_{i,g}\right)^2,\\
+\MSE_{\mathrm{estimand}}
+  &=\frac{1}{nG}\sum_{i,g}
+    \left(\widehat C_{i,g}-C^{\mathrm{exact}}_{i,g}\right)^2.
+\end{align}
+
+The second quantity measures Monte Carlo error.  The gap between the exact
+estimand and structural truth is an estimand mismatch that more computation
+cannot remove.
+
+\section{Monte Carlo Implementation}
+
+\subsection{Estimator}
+
+For every explained unit and player \(g\), the estimator draws
+\(K=\code{n\_coalitions}\) coalitions from the Shapley subset distribution.
+For each coalition it estimates
+
+\begin{equation}
+\widehat v_x(S)=\frac{1}{M}\sum_{m=1}^{M}
+f\!\left(\widetilde x_S^{(m)}\right),
+\qquad M=\code{n\_mask\_samples},
+\end{equation}
+
+then averages the marginal differences
+
+\begin{equation}
+\widehat\phi_g(x)=\frac{1}{K}\sum_{k=1}^{K}
+\left[\widehat v_x(S_k\cup\{g\})-\widehat v_x(S_k)\right].
+\end{equation}
+
+Increasing \code{n\_coalitions} reduces subset-sampling noise.  Increasing
+\code{n\_mask\_samples} reduces noise in the empirical coalition-value
+expectation.  The implementation samples the before and after coalition values
+independently.
+
+\subsection{Package Abstractions}
+
+The installable package is named \code{xpc}.  Its main responsibilities are:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l Y@{}}
+\toprule
+Abstraction & Implemented responsibility \\
+\midrule
+\code{DataSpec} & Tabular \((n,f)\) data and normalized \((n,H)\) outputs. \\
+\code{TimeSeriesTensorSpec} & Temporal \((n,d,f)\) data; masks one time row while the model receives the full sequence, returning \((n,d,H,G)\) explanations. \\
+\code{ModelAdapter} & NumPy boundary for callables, pandas, sklearn-style, PyTorch, external-script, R-script, and registered custom models. \\
+\code{Masker} & Deterministic baseline, unconditional empirical, or conditional empirical replacement. \\
+\code{Conditioner} & Nearest-neighbor, grid-cell, or user-defined non-generative conditional selection. \\
+\code{FeatureGroups} & Disjoint named players, remaining-feature policies, and always-present features. \\
+\code{ShapleyExplainer} & Monte Carlo subset estimator returning signed values and optional heightened parts. \\
+\code{Explanation} & Values, base values, predictions, efficiency residuals, heightening, and comparison metrics. \\
+\bottomrule
+\end{tabularx}
+\caption{Current XPC implementation boundaries.}
+\label{tab:abstractions}
+\end{table}
+
+For temporal inputs, background rows used by empirical maskers are drawn from
+the flattened collection of time locations.  Conditional matching operates on
+the features of the currently explained row; it is not a temporal generative
+model.
+
+Always-present features are excluded from the player set and restored in every
+coalition.  They receive no separate attribution.  They affect the base value
+and, in models with interactions, may also change the marginal contributions
+assigned to other players.
+
+\subsection{Explanation and Efficiency Diagnostics}
+
+An \code{Explanation} stores signed values \(\Phi\), base values \(b\), and
+model predictions \(\widehat y\).  Its efficiency residual is
+\(r=\widehat y-(b+\sum_g\widehat\phi_g)\).
+
+For a coherent exact Shapley game this residual is zero by
+Equation~\eqref{eq:efficiency}.  In the package it diagnoses finite Monte Carlo
+error, independently estimated coalition values, and model-output shape
+handling.  Changing from interventional to conditional masking changes the
+estimand, but does not by itself invalidate Shapley efficiency.
+
+\subsection{Heightening}
+
+Heightening is optional positive post-processing and is enabled by default.
+For every output and group, the implementation computes an offset over all
+batch axes,
+
+\begin{equation}
+o_{h,g}=\alpha\max\!\left(-\min_u\Phi_{u,h,g},0\right),
+\qquad \alpha\geq 0,
+\end{equation}
+
+then forms non-negative values, percentages, and target allocations:
+
+\begin{align}
+\Phi^+_{u,h,g}&=\max(\Phi_{u,h,g}+o_{h,g},0),\\
+p_{u,h,g}&=\frac{\Phi^+_{u,h,g}}{\sum_j\Phi^+_{u,h,j}},\\
+\mathrm{part}_{u,h,g}&=p_{u,h,g}T_{u,h}.
+\end{align}
+
+The target defaults to the non-negative model prediction.  If all positive
+values are zero, a uniform allocation is used.  Heightening leaves the signed
+values untouched.  All convergence and aggregation MSE experiments use signed
+values with \code{heighten=False}; heightened values are visualization outputs,
+not the estimand being benchmarked.
+
+\section{Convergence Experiment}
+
+The convergence benchmark uses the four structural groups in the direct
+grouped game.  The full 2880-row panel is the background.  Six evaluation rows
+are selected at evenly spaced indexes, and every setting is repeated five
+times with deterministic but distinct random seeds.
+
+Two one-dimensional sweeps are performed:
+
+\begin{itemize}
+  \item \code{n\_coalitions} in \(\{1,2,4,8,16,32\}\), with
+        \code{n\_mask\_samples}=16;
+  \item \code{n\_mask\_samples} in \(\{1,2,4,8,16,32\}\), with
+        \code{n\_coalitions}=16.
+\end{itemize}
+
+For interventional Shapley, the additive structural contribution is also the
+exact empirical estimand after the mean allocation in
+Equation~\eqref{eq:mean-allocation}.  For conditional Shapley, the notebook
+enumerates all coalitions and uses Equation~\eqref{eq:exact-conditional} to
+construct a separate exact empirical reference.
+
+As computation increases, the interventional structural MSE tends toward zero.
+Conditional MSE relative to its own estimand also decreases, but its structural
+MSE plateaus near the exact conditional estimand gap of \(7.31\).  For example,
+at 32 coalitions and 16 mask samples, the conditional MSE is \(0.172\) relative
+to its estimand and \(7.305\) relative to structural truth.  This is the central
+distinction of the experiment: convergence does not remove estimand bias.
+
+\section{Aggregation Games}
+
+The archived XPC work considered a climate group \(C\) and a non-climate group
+\(D=N\setminus C\).  The notebook reproduces three definitions.
+
+\subsection{Default Post-hoc Aggregation}
+
+First compute a Shapley value for every raw feature, then sum values belonging
+to the group:
+
+\begin{equation}
+\phi_C^{\mathrm{post}}(x)=\sum_{j\in C}\phi_j(x;v).
+\end{equation}
+
+This preserves the efficiency of the original raw-feature game after all
+groups are summed, but requires explaining every raw feature.
+
+\subsection{Coalitional Shapley}
+
+For each requested group \(C\), merge all features in \(C\) into one player
+while every feature outside \(C\) remains an individual player.  With
+\(q_C=p-|C|+1\),
+
+\begin{equation}
+\phi_C^{\mathrm{coal}}(x)
+=\sum_{S\subseteq N\setminus C}
+\frac{1}{q_C\binom{q_C-1}{|S|}}
+\left[v_x(S\cup C)-v_x(S)\right].
+\label{eq:coalitional}
+\end{equation}
+
+Climate and non-climate are computed in two different reduced games because
+their complements contain different raw players.  Each value is a valid
+Shapley value in its own game, but the pair is not generally jointly efficient.
+This corrects the stronger efficiency claim made in the historical report.
+
+\subsection{Simplified Two-player Shapley}
+
+Treat \(C\) and \(D\) as the only two players in one common game:
+
+\begin{align}
+\phi_C^{\mathrm{two}}(x)
+  &=\tfrac12\left([v_x(C)-v_x(\varnothing)]
+                 +[v_x(N)-v_x(D)]\right),\\
+\phi_D^{\mathrm{two}}(x)
+  &=\tfrac12\left([v_x(D)-v_x(\varnothing)]
+                 +[v_x(N)-v_x(C)]\right).
+\end{align}
+
+Only the four coalition values
+\(v(\varnothing),v(C),v(D),v(N)\) are needed.
+The pair is efficient because both values belong to the same two-player game.
+
+The package's direct grouped-player API generalizes this idea to any number of
+explicit groups through \code{ShapleyExplainer}.  The exact historical post-hoc,
+coalitional, and two-player comparison is implemented locally in the notebook,
+not as an \code{aggregation} parameter in the core package.
+
+\section{Aggregation Experiment and Results}
+
+The fixed-budget comparison uses 16 sampled coalitions, 16 masking samples per
+coalition value, six evaluation rows, and five repetitions.  The simplified
+mode does not sample coalitions because the two-player formula is exhaustive;
+its four coalition values are still estimated from 16 masked rows each.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Masking & Mode & Exact structural & MC structural & MC estimand & Rows/point \\
+\midrule
+Interventional & Post-hoc & 0.000 & 0.512 & 0.512 & 3072 \\
+Interventional & Coalitional & 0.000 & 0.171 & 0.171 & 1024 \\
+Interventional & Two-player & 0.000 & 1.594 & 1.594 & 64 \\
+Conditional & Post-hoc & 11.398 & 12.478 & 1.362 & 3072 \\
+Conditional & Coalitional & 10.943 & 10.718 & 0.573 & 1024 \\
+Conditional & Two-player & 10.203 & 11.572 & 1.267 & 64 \\
+\bottomrule
+\end{tabular}
+\caption{Aggregation-mode mean squared errors.  ``Exact structural'' is the
+exact empirical estimand's MSE against structural truth.  Monte Carlo columns
+are means over five repetitions.}
+\label{tab:aggregation-results}
+\end{table}
+
+The masked-row count follows directly from the implemented loops.  Post-hoc
+uses \(6\times16\times2\times16=3072\) model rows per point.  Coalitional uses
+\(2\times16\times2\times16=1024\).  The two-player mode uses
+\(4\times16=64\), a factor of 48 below post-hoc aggregation.  Measured timings
+show the same ordering but are machine-dependent.
+
+All interventional exact aggregation estimands coincide with structural truth
+because the model is additive.  Conditional exact estimands differ because
+conditioning reallocates signal among dependent features and because the three
+aggregation definitions are different games.  The smallest conditional exact
+structural MSE in this sample is not evidence that the corresponding mode is
+generally more causal.  It is a property of this data, model, grouping, and
+nearest-neighbor estimand.
+
+The exact conditional Coalitional pair has an efficiency RMSE of \(0.842\),
+while post-hoc and the common two-player game are efficient up to numerical
+precision.  This confirms that independently computed Coalitional group values
+should not be interpreted as a single efficient decomposition.
+
+\section{Outputs and Reproducibility}
+
+The single Colab-ready notebook is \code{src/xtsf.ipynb}.  It caches the
+synthetic panel and writes generated artifacts under \code{outputs/}:
+
+\begin{itemize}
+  \item \path{outputs/synthetic_forecasting_panel.csv};
+  \item \path{outputs/shapley_convergence_runs.csv};
+  \item \path{outputs/shapley_convergence_summary.csv};
+  \item \path{outputs/shapley_convergence.png};
+  \item \path{outputs/aggregation_exact_estimands.csv};
+  \item \path{outputs/aggregation_mode_runs.csv};
+  \item \path{outputs/aggregation_mode_summary.csv};
+  \item \path{outputs/aggregation_modes.png}.
+\end{itemize}
+
+The package implementation is under \code{src/xpc/}; lightweight tests are
+under \code{src/tests/}.  The public estimator deliberately excludes known
+contributions, SMACH-specific processing, GAM-specific paths, Kernel SHAP,
+Permutation SHAP, and generative conditional models.  External or known
+contributions enter through \code{Explanation.from\_contributions} and
+\code{Explanation.compare}, not through the estimator.
+
+\section{Interpretation and Limitations}
+
+\begin{itemize}
+  \item The exact structural decomposition is available because the synthetic
+        model is additive and matches the data-generating process.  More complex
+        models with interactions will not make the three interventional
+        aggregation estimands coincide.
+  \item Conditional nearest-neighbor masking avoids many unsupported feature
+        combinations, but remains a finite-sample associational approximation.
+        It does not identify interventions or causal effects.
+  \item Exact empirical references remove Monte Carlo noise but retain finite
+        background, neighbor-selection, model, and grouping choices.
+  \item The benchmarks use six evaluation points and five repetitions.  They
+        demonstrate estimand and computation effects, but are not a definitive
+        large-sample performance study.
+  \item Heightened positive parts are useful forecast allocations, but they are
+        post-processed visual quantities.  Scientific error comparisons use the
+        signed Shapley values plus the documented background-mean allocation.
+\end{itemize}
+
+\end{document}

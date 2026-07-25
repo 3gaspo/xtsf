@@ -1,6 +1,7 @@
-# XPC
+# XTSF
 
-XPC is a focused Monte Carlo Shapley toolkit for NumPy, pandas, sklearn,
+XTSF develops a focused Monte Carlo Shapley toolkit, published as the `xpc`
+Python package, for NumPy, pandas, sklearn,
 PyTorch, script-backed, and custom models. It supports ordinary tabular data
 and temporal tensors shaped `(n, d, f)`.
 
@@ -18,6 +19,25 @@ pip install -e ".[test]"
 
 Optional dependencies are split into `pandas`, `torch`, `notebook`, and `all`
 extras.
+
+## Project Structure
+
+- `src/xpc/`: package implementation
+- `src/xtsf.ipynb`: the single Colab-ready synthetic forecasting notebook
+- `src/tests/`: dependency-light unit and smoke tests
+- `outputs/`: generated notebook datasets and other experiment artifacts
+- `logs/`: runtime logs
+
+The notebook exposes an early `on_drive` switch. In local mode it uses the
+project-relative `datasets/` directory; in Drive mode it mounts Google Drive
+and changes into the repository's `src/` directory. Its generated synthetic
+panel is cached under `outputs/`. It also benchmarks interventional and
+conditional Monte Carlo Shapley estimates against the known structural
+contributions while varying coalition and mask-sample budgets. A second
+benchmark reproduces the original XPC aggregation study: post-hoc aggregation,
+Coalitional Shapley, and the two-player Simplified Shapley definition are
+compared at a fixed budget under both masking rules, against structural truth
+and each mode's exact all-coalition estimand.
 
 ## Quick Start
 
@@ -170,11 +190,25 @@ positive target. Use `heighten=False` when only signed values are needed.
 
 ## Tests And Notebook
 
-Run the dependency-light suite with:
+Run the dependency-light suite from the project root with:
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests -v
+PYTHONPATH=src python -m unittest discover -s src/tests -v
 ```
 
 PyTorch, sklearn, and R tests skip when their runtimes are unavailable. See
-`examples/synthetic_temporal_toolkit.ipynb` for a synthetic end-to-end tour.
+`src/xtsf.ipynb` for the synthetic end-to-end forecasting explanation and
+heightened contribution plots. The convergence benchmark exports its repeated
+runs, summary, and figure as `outputs/shapley_convergence_runs.csv`,
+`outputs/shapley_convergence_summary.csv`, and
+`outputs/shapley_convergence.png`. The aggregation benchmark writes
+`outputs/aggregation_exact_estimands.csv`,
+`outputs/aggregation_mode_runs.csv`,
+`outputs/aggregation_mode_summary.csv`, and
+`outputs/aggregation_modes.png`.
+
+## Provenance
+
+This project is a streamlined continuation of the original XPC research code.
+The historical implementation is retained separately as read-only thesis
+archive material; it is a reference, not a second copy of the active package.

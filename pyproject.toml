@@ -24,5 +24,6 @@ where = ["src"]
 include = ["xpc*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["src/tests"]
+pythonpath = ["src"]
 addopts = "-ra"
