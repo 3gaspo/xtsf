@@ -212,3 +212,20 @@ runs, summary, and figure as `outputs/shapley_convergence_runs.csv`,
 This project is a streamlined continuation of the original XPC research code.
 The historical implementation is retained separately as read-only thesis
 archive material; it is a reference, not a second copy of the active package.
+
+## LaTeX documents
+
+`latex/experiment_guideline.tex` is the current theoretical, implementation,
+experiment, cache, and artifact specification. `latex/executive_summary.tex`
+contains the analyzed convergence and aggregation results without duplicating
+the protocol. Their PDFs are kept beside the sources.
+
+## Maintenance workflow
+
+Every project change is recorded in `PENDING_UPDATES.md` with its scope,
+affected contracts, focused checks already completed, deferred integration
+coverage, documentation impact, and rerun requirements. Routine edits use only
+the smallest relevant smoke check. Periodic maintenance verifies pending entries
+against the implementation, runs complementary generic lightweight smoke tests,
+reconciles this README and the project LaTeX documents, and renders affected
+PDFs before resolving the entries.

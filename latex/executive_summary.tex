@@ -1,0 +1,74 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern,microtype}
+\usepackage[margin=18mm]{geometry}
+\usepackage{booktabs,tabularx,array,xcolor,hyperref}
+\definecolor{navy}{HTML}{17365D}
+\hypersetup{colorlinks=true,linkcolor=navy,urlcolor=navy}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.6\baselineskip}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\title{\textbf{XTSF: Synthetic Forecasting Explanations with XPC}\\Executive Summary}
+\author{Thesis project}
+\date{Results available through 7 August 2026}
+\begin{document}
+\maketitle
+
+\section*{Decision snapshot}
+Interventional Shapley converges toward the known additive structural
+contribution. Conditional Shapley also converges toward its own exact estimand,
+but retains a large structural mismatch because dependent features redistribute
+credit. Coalitional grouping gives the best current accuracy/cost compromise;
+the simplified game is fastest but changes the estimand materially.
+
+\section{Convergence}
+Increasing coalition or masking budgets reduces Monte Carlo error for both
+methods. At 32 sampled coalitions, interventional MSE is 0.103 against both its
+exact estimand and structural truth. Conditional MSE is 0.172 against its exact
+estimand but 7.31 against structural truth. With 32 masking samples, the
+corresponding values are 0.088 for interventional, and 0.333 versus 7.53 for
+conditional.
+
+The persistent conditional structural error is therefore not primarily a Monte
+Carlo failure. It is a difference between the conditional attribution estimand
+and the chosen signed structural decomposition.
+
+\section{Aggregation experiment}
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}llrrrr@{}}
+\toprule
+Method & Mode & Structural MSE & Estimand MSE & ms/point & Rows \\
+\midrule
+Interventional & coalitional & 0.171 & 0.171 & 4.14 & 1024 \\
+Interventional & default & 0.512 & 0.512 & 12.40 & 3072 \\
+Interventional & simplified & 1.594 & 1.594 & 0.18 & 64 \\
+Conditional & coalitional & 10.72 & 0.573 & 22.31 & 1024 \\
+Conditional & default & 12.48 & 1.362 & 48.15 & 3072 \\
+Conditional & simplified & 11.57 & 1.267 & 0.79 & 64 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+Coalitional grouping improves accuracy over post-hoc default aggregation while
+using one third as many model rows. The two-player simplified mode is orders of
+magnitude faster but has noticeably larger estimand error and a different
+interaction allocation.
+
+\section{Supported conclusions}
+\begin{itemize}
+\item Monte Carlo convergence must be reported separately from estimand
+      validity.
+\item Exact conditional explanations are not automatically structural
+      explanations under feature dependence.
+\item Grouping before explanation is preferable to post-hoc aggregation in the
+      current synthetic benchmark.
+\item Simplified games are useful speed controls, not drop-in equivalents.
+\end{itemize}
+
+\section{Limitations and next evidence}
+The evidence is synthetic and model-specific. Fixed output filenames and a
+cached panel require disciplined regeneration. The next study should vary
+dependence strength, background size, model class, and grouping structure while
+retaining exact-estimand and structural-error diagnostics.
+\end{document}

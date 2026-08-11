@@ -1,0 +1,106 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern,microtype}
+\usepackage[margin=18mm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,tabularx,array}
+\usepackage{xcolor,hyperref,enumitem}
+\definecolor{navy}{HTML}{17365D}
+\hypersetup{colorlinks=true,linkcolor=navy,urlcolor=navy}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55\baselineskip}
+\setlist{nosep,leftmargin=*}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\E}{\mathbb E}
+\title{\textbf{XTSF: Synthetic Forecasting Explanations with XPC}\\Experiment Guideline}
+\author{Thesis project}
+\date{7 August 2026}
+\begin{document}
+\maketitle
+
+\section{Research question}
+XTSF asks whether Monte Carlo Shapley explanations recover known contributions
+in a controlled forecasting problem, and distinguishes:
+\begin{enumerate}
+\item estimator error relative to the chosen exact Shapley estimand;
+\item estimand mismatch relative to the known structural decomposition.
+\end{enumerate}
+This prevents convergence to a well-defined but scientifically inappropriate
+estimand from being mistaken for recovery of ground truth.
+
+\section{Synthetic structural ground truth}
+The hourly response is a sum of explicit weather, calendar, trend, interaction,
+and irrelevant components. Each feature group therefore has a known signed
+structural contribution. The trained forecasting model consumes lagged targets
+and exogenous features through a common tabular adapter. Generator parameters,
+noise, train/test split, and model fitting must all be fixed by one run seed.
+
+\section{Shapley estimands}
+For feature groups $N=\{1,\ldots,n\}$ and coalition value $v(S)$,
+\[
+\phi_i(v)=\sum_{S\subseteq N\setminus\{i\}}
+\frac{|S|!(n-|S|-1)!}{n!}\left[v(S\cup\{i\})-v(S)\right].
+\]
+The interventional value masks absent features independently from their
+observed dependence. The conditional value uses nearest-neighbor conditional
+backgrounds. Exact enumeration defines each method's estimand; Monte Carlo
+coalition and mask sampling approximate it.
+
+\section{Convergence experiment}
+The two sampling axes are varied separately over
+$\{1,2,4,8,16,32\}$:
+\begin{itemize}
+\item sampled coalitions with 16 masking samples fixed;
+\item masking samples with 16 sampled coalitions fixed.
+\end{itemize}
+Each configuration is repeated across fixed seeds. Report MSE against both the
+exact method-specific estimand and the signed structural contribution. The
+interventional estimand equals the structural target in the current additive
+construction; the conditional estimand need not because dependence redistributes
+credit.
+
+\section{Aggregation games}
+Three ways to explain grouped forecasts are compared:
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}lYY@{}}
+\toprule
+Mode & Game & Practical trade-off \\
+\midrule
+\code{default} & explain fine features, then aggregate attributions &
+largest model-row count \\
+\code{coalitional} & define groups as players before Shapley estimation &
+aligned grouped game, moderate cost \\
+\code{simplified} & two-player grouped approximation & fastest, changed
+estimand and coarser interaction allocation \\
+\bottomrule
+\end{tabularx}
+\end{center}
+Report structural MSE, exact-estimand MSE, efficiency RMSE, time per explained
+point, and model rows per point.
+
+\section{Implementation}
+Reusable code lives in \code{src/xpc/}: data/model adapters, maskers, feature
+groups, coalition values, exact/Monte Carlo estimators, heightening, and
+aggregation helpers. The maintained notebook \code{src/xtsf.ipynb} defines the
+reference experiment and exports tables and figures.
+
+The synthetic panel cache is
+\code{outputs/synthetic_forecasting_panel.csv}. Set
+\code{REBUILD_SYNTHETIC=True} whenever generator settings or the seed change;
+otherwise the existing fixed file is deliberately reused.
+
+\section{Artifacts}
+The notebook writes convergence run/summary CSVs and a plot, exact aggregation
+estimands, aggregation run/summary CSVs and a plot, plus JSON plot data. Output
+filenames are fixed. A rerun replaces them, so distinct configurations require
+distinct output roots or complete regeneration of all related artifacts.
+
+\section{Validation and interpretation}
+Run the package unit tests and the notebook smoke in the prepared environment.
+Verify efficiency, grouping consistency, exact-versus-Monte-Carlo agreement,
+and signed structural scale before interpreting plots. Conclusions about
+conditional versus interventional explanations are specific to the chosen
+background distribution and structural target.
+\end{document}
