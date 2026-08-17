@@ -207,6 +207,21 @@ runs, summary, and figure as `outputs/shapley_convergence_runs.csv`,
 `outputs/aggregation_mode_summary.csv`, and
 `outputs/aggregation_modes.png`.
 
+## Publishing artifacts
+
+Run the thesis-standard publisher from the project Git root to synchronize
+`main`, commit the complete lightweight `logs/` and `outputs/` trees, and push:
+
+```bash
+bash publish_job.sh
+```
+
+The script sources `$HOME/codes/proxy.sh`, fast-forward pulls `origin/main`
+before staging, excludes `*.pt`, `*.npy`, and `*.cbm`, commits only the selected
+artifact paths, and pushes `origin/main`. `PROXY_SCRIPT_PATH` overrides the
+proxy script location. Passing a numeric Slurm job ID publishes only its exact
+stdout/stderr log pair; omit the ID to publish the parent artifact trees.
+
 ## Provenance
 
 This project is a streamlined continuation of the original XPC research code.
