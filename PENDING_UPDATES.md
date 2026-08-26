@@ -25,3 +25,41 @@ changed. Bash syntax passed for all nine byte-identical project copies; this was
 repeated because the publisher is the only executable integration boundary.
 Notebook smoke and PDF rendering were skipped as inapplicable. The first real
 cluster publish remains required before this entry can be resolved.
+
+Maintenance 2026-08-18: direct inspection found no package, notebook,
+artifact, or LaTeX contract change beyond the simplified publisher, and the
+README already matches its exact-log/full-tree behavior. Git Bash syntax passed
+for all nine byte-identical publisher copies; this shared check was repeated
+because the script is the only changed executable boundary. Package smoke and
+PDF rendering were skipped as inapplicable. The first real cluster publish
+remains required before resolution.
+
+Maintenance 2026-08-19: direct inspection found no package, notebook,
+artifact, or public-contract change. The README still matches the canonical
+publisher, and all nine publisher copies remain byte-identical at SHA-256
+`0A9E87E51517B9F5816BB92CDE726B9E383AB6B8A70DC251FEF429BF7B53B45C`.
+The unchanged package/notebook checks, Bash syntax, and PDFs were not repeated
+because no integration boundary changed. The first real cluster publish
+remains required before resolution.
+
+Maintenance 2026-08-20: direct timestamp, repository, artifact, and notebook
+inspection found no package, output, log, or public-contract change after the
+previous pass. The publisher remains byte-identical across all nine projects
+at SHA-256
+`0A9E87E51517B9F5816BB92CDE726B9E383AB6B8A70DC251FEF429BF7B53B45C`.
+Package/notebook, Bash-syntax, and PDF checks were deliberately skipped because
+their inputs and integration boundaries are unchanged. The first real cluster
+publish remains required before resolution.
+
+Maintenance 2026-08-24: direct repository, notebook, artifact, README, LaTeX,
+and guidance inspection found no code or public-contract change behind the
+local value-based guidance update. That guidance-only entry is resolved.
+Package/notebook tests and PDF rendering were deliberately skipped as
+inapplicable; the first real publisher run remains pending.
+
+Maintenance 2026-08-26: direct repository, notebook, README, LaTeX timestamp,
+active-output, and archive-manifest inspection confirmed zero active payloads
+and the eight administratively archived files totaling 659,662 bytes. The
+archive-only entry is resolved without changing its historical evidence.
+Package, notebook, publisher, and PDF checks were not repeated because no
+corresponding boundary changed. The first real publisher run remains pending.

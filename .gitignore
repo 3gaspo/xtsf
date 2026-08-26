@@ -1,4 +1,5 @@
 AGENTS.md
+archive/
 .venv/
 __pycache__/
 *.py[cod]
