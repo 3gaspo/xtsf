@@ -3,7 +3,9 @@
 XTSF develops a focused Monte Carlo Shapley toolkit, published as the `xpc`
 Python package, for NumPy, pandas, sklearn,
 PyTorch, script-backed, and custom models. It supports ordinary tabular data
-and temporal tensors shaped `(n, d, f)`.
+and temporal tensors shaped `(n, d, f)`. Reusable diagnostics add
+one-dimensional PDP and ALE curves, prediction-error plots, raw-Shapley
+waterfalls, parameter metadata, and seeded synthetic forecasting windows.
 
 The package intentionally contains one explanation algorithm: Monte Carlo
 Shapley estimation over explicit feature-group players. Kernel SHAP,
@@ -15,25 +17,37 @@ conditioning, and estimator-side known contributions are not part of the API.
 ```bash
 pip install -e .
 pip install -e ".[test]"
+pip install -e ".[notebook]"
 ```
 
 Optional dependencies are split into `pandas`, `torch`, `notebook`, and `all`
-extras.
+extras. The `notebook` extra includes Matplotlib and Hugging Face Transformers
+for the PatchTST demonstration.
 
 ## Project Structure
 
-- `src/xpc/`: package implementation
-- `src/xtsf.ipynb`: the single Colab-ready synthetic forecasting notebook
+- `src/xpc/adapters.py`, `data.py`, `groups.py`, `maskers.py`, and
+  `conditioners.py`: model/data boundaries and coalition construction
+- `src/xpc/explainer.py` and `explanation.py`: Monte Carlo Shapley estimation
+  and contribution post-processing
+- `src/xpc/effects.py` and `diagnostics.py`: PDP, first-order ALE, and error
+  computations
+- `src/xpc/plots.py`: lazy-Matplotlib effect, error, and waterfall plots
+- `src/xpc/inspection.py`: named-parameter counts and structure
+- `src/xpc/synthetic.py`: seeded synthetic series and forecasting windows
+- `src/xtsf.ipynb`: the Colab-ready reference synthetic Shapley experiment
+- `src/patchtst_explainability.ipynb`: compact PatchTST diagnostics tutorial
 - `src/tests/`: dependency-light unit and smoke tests
 - `outputs/`: generated notebook datasets and other experiment artifacts
 - `logs/`: runtime logs
 
-The notebook exposes an early `on_drive` switch. In local mode it uses the
-project-relative `datasets/` directory; in Drive mode it mounts Google Drive
-and changes into the repository's `src/` directory. Its generated synthetic
-panel is cached under `outputs/`. It also benchmarks interventional and
-conditional Monte Carlo Shapley estimates against the known structural
-contributions while varying coalition and mask-sample budgets. A second
+Both notebooks expose an early `on_drive` switch. In local mode they use the
+project-relative `datasets/` directory; in Drive mode they mount Google Drive
+and add the repository's `src/` directory to the import path. The reference
+notebook's generated synthetic panel is cached under `outputs/`. It also
+benchmarks interventional and conditional Monte Carlo Shapley estimates
+against the known structural contributions while varying coalition and
+mask-sample budgets. A second
 benchmark reproduces the original XPC aggregation study: post-hoc aggregation,
 Coalitional Shapley, and the two-player Simplified Shapley definition are
 compared at a fixed budget under both masking rules, against structural truth
@@ -74,6 +88,11 @@ print(explanation.values.shape)
   attached heightened parts by default; pass `heighten=False` to disable.
 - `Explanation`: signed values, precomputed contribution ingestion,
   heightening, and reference comparison.
+- `PartialDependence` and `AccumulatedLocalEffects`: reusable multi-output
+  effect-curve results, separated from plotting.
+- `ParameterCounts` and `ParameterInfo`: framework-light named-parameter
+  metadata for models exposing `named_parameters()`.
+- `SyntheticForecastingData`: seeded series components and supervised windows.
 
 ## Temporal Models
 
@@ -163,6 +182,51 @@ r_adapter = RScriptModelAdapter("predict.R", output_columns=["prediction"])
 `ScriptModelAdapter` passes temporary CSV paths through `{input}` and
 `{output}` command placeholders. Scripts must write a headered output CSV.
 
+## Effect Curves And Diagnostic Plots
+
+PDP and first-order ALE computations accept the same explicit model adapters
+as the Shapley estimator and preserve every flattened model output:
+
+```python
+from xpc import (
+    accumulated_local_effects,
+    partial_dependence,
+    plot_accumulated_local_effects,
+    plot_partial_dependence,
+)
+
+pdp = partial_dependence(model, X, "temperature", feature_names=feature_names)
+ale = accumulated_local_effects(
+    model, X, "temperature", feature_names=feature_names, n_bins=10
+)
+plot_partial_dependence(pdp, output=0)
+plot_accumulated_local_effects(ale, output=0)
+```
+
+`plot_prediction_errors` draws targets/predictions, residual order, and a
+residual histogram while reporting MAE, RMSE, and bias.
+`plot_shapley_waterfall` plots one output of one `Explanation` from its base
+value through raw signed group contributions. A distinct reconstruction line
+is retained when finite Monte Carlo error leaves a nonzero efficiency residual.
+These diagnostics are associational and remain conditional on the supplied
+data and masking distribution.
+
+## Parameter Inspection
+
+`parameter_counts(model)` reports total, trainable, and frozen elements and
+tensor counts. `parameter_structure(model)` returns each named tensor's name,
+shape, element count, trainability, and dtype without copying weight values.
+The model must expose `named_parameters()`, as PyTorch modules do; opaque
+callable and script adapters remain prediction-only.
+
+## Synthetic Forecasting Data
+
+`make_synthetic_forecasting_data` provides a deterministic univariate series
+with level, trend, daily, weekly, interaction, and noise components. It also
+returns chronological context and target tensors shaped
+`(samples, context, 1)` and `(samples, horizon, 1)`. One `seed` owns the noise
+and repeated calls with the same settings are identical.
+
 ## Precomputed Contributions And Heightening
 
 Known contributions do not enter the estimator. Ingest them explicitly:
@@ -198,7 +262,10 @@ PYTHONPATH=src python -m unittest discover -s src/tests -v
 
 PyTorch, sklearn, and R tests skip when their runtimes are unavailable. See
 `src/xtsf.ipynb` for the synthetic end-to-end forecasting explanation and
-heightened contribution plots. The convergence benchmark exports its repeated
+heightened contribution plots. See `src/patchtst_explainability.ipynb` for a
+small locally trained PatchTST example covering the synthetic helper, model
+structure, error plots, PDP, first-order ALE, and a grouped Shapley waterfall.
+The convergence benchmark exports its repeated
 runs, summary, and figure as `outputs/shapley_convergence_runs.csv`,
 `outputs/shapley_convergence_summary.csv`, and
 `outputs/shapley_convergence.png`. The aggregation benchmark writes
@@ -210,17 +277,31 @@ runs, summary, and figure as `outputs/shapley_convergence_runs.csv`,
 ## Publishing artifacts
 
 Run the thesis-standard publisher from the project Git root to synchronize
-`main`, commit the complete lightweight `logs/` and `outputs/` trees, and push:
+`main`, commit the complete lightweight `logs/` and `outputs/` trees plus paired
+`logs_selena/` and lightweight `outputs_selena/` trees when present, and push:
 
 ```bash
 bash publish_job.sh
+bash publish_job.sh --size detailed
 ```
 
 The script sources `$HOME/codes/proxy.sh`, fast-forward pulls `origin/main`
-before staging, excludes `*.pt`, `*.npy`, and `*.cbm`, commits only the selected
-artifact paths, and pushes `origin/main`. `PROXY_SCRIPT_PATH` overrides the
-proxy script location. Passing a numeric Slurm job ID publishes only its exact
-stdout/stderr log pair; omit the ID to publish the parent artifact trees.
+before staging, commits only selected artifact paths, and pushes `origin/main`.
+Lightweight is the default and omits row-level window/user-date/sample tables
+and per-run criterion/example plots; `--size detailed` adds them. Both tiers
+exclude `*.pt`, `*.npy`, and `*.cbm`. `PROXY_SCRIPT_PATH` overrides the proxy
+location. A numeric job ID publishes only its exact log pair; a partial Selena
+namespace fails closed.
+
+Before staging, each selected non-excluded file larger than 100,000,000 bytes
+is replaced for publication by `<original>.sample.txt`. Text samples contain
+source metadata and the first 10% of content, capped at 10,000,000 bytes;
+binary samples contain metadata only. The header retains the first UTC time
+when the associated file became stale on Git because of its size. The original
+is excluded literally from
+both staging and commit selection. `PUBLISH_MAX_FILE_BYTES` and
+`PUBLISH_SAMPLE_MAX_BYTES` override the positive byte limits, with the sample
+limit required to remain smaller.
 
 ## Provenance
 
@@ -240,7 +321,9 @@ the protocol. Their PDFs are kept beside the sources.
 Every project change is recorded in `PENDING_UPDATES.md` with its scope,
 affected contracts, focused checks already completed, deferred integration
 coverage, documentation impact, and rerun requirements. Routine edits use only
-the smallest relevant smoke check. Periodic maintenance verifies pending entries
-against the implementation, runs complementary generic lightweight smoke tests,
-reconciles this README and the project LaTeX documents, and renders affected
-PDFs before resolving the entries.
+the smallest relevant smoke check. Brief daily triage compares stored
+fingerprints and updates the queue only for new source, artifact, or external
+state; unchanged blockers are carried forward. Broad weekly maintenance verifies
+changed entries against the implementation, runs complementary lightweight
+integration checks, reconciles this README and the project LaTeX documents, and
+renders affected PDFs before resolving entries.
